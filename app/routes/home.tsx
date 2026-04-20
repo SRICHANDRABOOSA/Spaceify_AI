@@ -1,4 +1,4 @@
-import { ArrowRight, ArrowUpRight, Clock, Layers } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Clock, Layers, LucideUpload, Upload } from "lucide-react";
 import Navbar from "../../components/Navbar";
 import type { Route } from "./+types/home";
 import Button from "../../components/ui/Button";
@@ -45,7 +45,8 @@ export default function Home() {
                 <h3>Upload your Floor Plan</h3>
                 <p>Supports JPG, PNG formats upto 10MB</p>
               </div>
-              <p>Upload Images</p>
+
+              <Upload/>
             </div>
           </div>
       </section>
