@@ -7,7 +7,7 @@ import {
   REDIRECT_DELAY_MS,
 } from "../lib/Constants";
 
-type UploadProps = {
+interface UploadProps {
   onComplete?: (base64Data: string) => Promise<boolean | void> | boolean | void;
 };
 
@@ -28,7 +28,7 @@ const Upload = ({ onComplete }: UploadProps) => {
       }
 
       if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
+        clearTimeout(timeoutRef.current); // clear timeout on unmount to prevent memory leaks
       }
     };
   }, []);
@@ -182,7 +182,7 @@ const Upload = ({ onComplete }: UploadProps) => {
     <div className="upload">
       {!file ? (
         <div
-          className={`dropzone ${isDragging ? "is-dragging" : ""}`}
+          className={`dropzone ${isDragging ? 'is-dragging' : ''}`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -202,7 +202,7 @@ const Upload = ({ onComplete }: UploadProps) => {
                 ? "Click to Upload or just drag and drop"
                 : "Sign in or Sign up with Puterto Upload"}
             </p>
-            <p className="help">Maximum file size 50MB</p>
+            <p className="help">Maximum file size 50MB.</p>
             {error ? <p className="help">{error}</p> : null}
           </div>
         </div>
@@ -221,7 +221,7 @@ const Upload = ({ onComplete }: UploadProps) => {
             <div className="progress">
               <div className="bar" style={{ width: `${progress}%` }} />
               <p className="status-text">
-                {progress < 100 ? `Analyzing Floor Plan...` : `Redirecting...`}
+                {progress < 100 ? 'Analyzing Floor Plan...' : 'Redirecting...'}
               </p>
             </div>
           </div>
