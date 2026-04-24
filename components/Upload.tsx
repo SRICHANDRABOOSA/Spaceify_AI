@@ -1,188 +1,184 @@
-import { CheckCircle2, ImageIcon, UploadIcon } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOutletContext } from "react-router";
+import { CheckCircle2, ImageIcon, UploadIcon } from "lucide-react";
+import AuthRequiredModal from "./AuthRequiredModal";
 import {
   PROGRESS_INCREMENT,
-  PROGRESS_INTERVAL_MS,
   REDIRECT_DELAY_MS,
+  PROGRESS_INTERVAL_MS,
 } from "../lib/Constants";
 
 interface UploadProps {
   onComplete?: (base64Data: string) => Promise<boolean | void> | boolean | void;
-};
+}
 
 const Upload = ({ onComplete }: UploadProps) => {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { isSignedIn, signIn } = useOutletContext<AuthContext>();
+  const { isSignedIn, signIn, notify } = useOutletContext<AuthContext>();
 
   useEffect(() => {
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
-
       if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current); // clear timeout on unmount to prevent memory leaks
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
     };
   }, []);
 
-  const resetTimers = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-  };
-
-  const finishUpload = useCallback(
-    async (base64Data: string) => {
-      try {
-        const result = await onComplete?.(base64Data);
-
-        if (result === false) {
-          setFile(null);
-          setProgress(0);
-          setError(
-            "Upload completed, but the next step failed. Please try again.",
-          );
-        }
-      } catch {
-        setFile(null);
-        setProgress(0);
-        setError(
-          "Something went wrong while preparing your image. Please try again.",
-        );
-      } finally {
-        timeoutRef.current = null;
-      }
+  const showError = useCallback(
+    (message: string) => {
+      notify(message, "error");
     },
-    [onComplete],
+    [notify],
   );
 
-  const processFile = (selectedFile: File) => {
-    setError(null);
+  const promptSignIn = useCallback(() => {
+    setIsAuthModalOpen(true);
+    showError("Please sign in with Puter before uploading.");
+  }, [showError]);
 
-    resetTimers();
-    setFile(selectedFile);
-    setProgress(0);
+  const handleModalCancel = () => setIsAuthModalOpen(false);
 
-    const reader = new FileReader();
+  const handleModalConfirm = async () => {
+    try {
+      const signedIn = await signIn();
 
-    reader.onload = () => {
-      const base64Data = typeof reader.result === "string" ? reader.result : "";
+      if (!signedIn) {
+        showError("Sign in failed. Please try again.");
+        return;
+      }
 
-      intervalRef.current = setInterval(() => {
-        setProgress((currentProgress) => {
-          const nextProgress = Math.min(
-            100,
-            currentProgress + PROGRESS_INCREMENT,
-          );
-
-          if (nextProgress === 100) {
-            resetTimers();
-            timeoutRef.current = setTimeout(() => {
-              void finishUpload(base64Data);
-            }, REDIRECT_DELAY_MS);
-          }
-
-          return nextProgress;
-        });
-      }, PROGRESS_INTERVAL_MS);
-    };
-
-    reader.readAsDataURL(selectedFile);
+      setIsAuthModalOpen(false);
+      notify("Signed in successfully.", "success", 2200);
+    } catch {
+      showError("Sign in failed. Please try again.");
+    }
   };
 
-  const ensureSignedIn = async () => {
-    if (isSignedIn) return true;
+  const processFile = useCallback(
+    (file: File) => {
+      if (!isSignedIn) {
+        promptSignIn();
+        return;
+      }
 
-    const signedIn = await signIn();
-    return signedIn;
+      setFile(file);
+      setProgress(0);
+
+      const reader = new FileReader();
+      reader.onerror = () => {
+        setFile(null);
+        setProgress(0);
+        showError("Failed to read this image. Please try another file.");
+      };
+      reader.onloadend = () => {
+        const base64Data = reader.result as string;
+
+        intervalRef.current = setInterval(() => {
+          setProgress((prev) => {
+            const next = prev + PROGRESS_INCREMENT;
+            if (next >= 100) {
+              if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+              }
+              timeoutRef.current = setTimeout(async () => {
+                try {
+                  const result = await onComplete?.(base64Data);
+
+                  if (result === false) {
+                    setFile(null);
+                    setProgress(0);
+                    showError(
+                      "Upload completed, but project setup failed. Please try again.",
+                    );
+                  }
+                } catch (error) {
+                  console.error("Upload completion failed:", error);
+                  setFile(null);
+                  setProgress(0);
+                  showError(
+                    "Something went wrong while preparing your 3D view. Please try again.",
+                  );
+                } finally {
+                  timeoutRef.current = null;
+                }
+              }, REDIRECT_DELAY_MS);
+              return 100;
+            }
+            return next;
+          });
+        }, PROGRESS_INTERVAL_MS);
+      };
+      reader.readAsDataURL(file);
+    },
+    [isSignedIn, onComplete, promptSignIn, showError],
+  );
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!isSignedIn) return;
+    setIsDragging(true);
   };
 
-  const isAllowedImage = (selectedFile: File) => {
-    return ["image/jpeg", "image/png"].includes(selectedFile.type);
+  const handleDragLeave = () => {
+    setIsDragging(false);
   };
 
-  const handleFileChange = async (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    const selectedFile = event.target.files?.[0];
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
 
-    if (!selectedFile) return;
-
-    if (!isAllowedImage(selectedFile)) {
-      setError("Please upload a JPG or PNG image.");
-      event.currentTarget.value = "";
+    if (!isSignedIn) {
+      promptSignIn();
       return;
     }
 
-    const signedIn = await ensureSignedIn();
+    const droppedFile = e.dataTransfer.files[0];
+    const allowedTypes = ["image/jpeg", "image/png"];
+    if (droppedFile && allowedTypes.includes(droppedFile.type)) {
+      processFile(droppedFile);
+    } else {
+      showError("Please upload a JPG or PNG image.");
+    }
+  };
 
-    if (!signedIn) {
-      setError("Please sign in before uploading.");
-      event.currentTarget.value = "";
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isSignedIn) {
+      e.currentTarget.value = "";
+      promptSignIn();
+      return;
+    }
+
+    const selectedFile = e.target.files?.[0];
+    const allowedTypes = ["image/jpeg", "image/png"];
+
+    if (!selectedFile) return;
+
+    if (!allowedTypes.includes(selectedFile.type)) {
+      showError("Please upload a JPG or PNG image.");
+      e.currentTarget.value = "";
       return;
     }
 
     processFile(selectedFile);
   };
 
-  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-
-    if (!isSignedIn) return;
-
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragging(false);
-  };
-
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragging(false);
-
-    if (!isSignedIn) {
-      void (async () => {
-        const signedIn = await ensureSignedIn();
-        if (!signedIn) {
-          setError("Please sign in before uploading.");
-        }
-      })();
-      return;
-    }
-
-    const droppedFile = event.dataTransfer.files?.[0];
-
-    if (!droppedFile) return;
-
-    if (!isAllowedImage(droppedFile)) {
-      setError("Please upload a JPG or PNG image.");
-      return;
-    }
-
-    processFile(droppedFile);
-  };
-
   return (
     <div className="upload">
       {!file ? (
         <div
-          className={`dropzone ${isDragging ? 'is-dragging' : ''}`}
+          className={`dropzone ${isDragging ? "is-dragging" : ""}`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -191,19 +187,19 @@ const Upload = ({ onComplete }: UploadProps) => {
             type="file"
             className="drop-input"
             accept=".jpg,.jpeg,.png"
-            onChange={handleFileChange}
+            onChange={handleChange}
           />
+
           <div className="drop-content">
             <div className="drop-icon">
               <UploadIcon size={20} />
             </div>
             <p>
               {isSignedIn
-                ? "Click to Upload or just drag and drop"
-                : "Sign in or Sign up with Puterto Upload"}
+                ? "Click to upload or just drag and drop"
+                : "Sign in or sign up with Puter to upload"}
             </p>
-            <p className="help">Maximum file size 50MB.</p>
-            {error ? <p className="help">{error}</p> : null}
+            <p className="help">Maximum file size 50 MB.</p>
           </div>
         </div>
       ) : (
@@ -218,17 +214,27 @@ const Upload = ({ onComplete }: UploadProps) => {
             </div>
 
             <h3>{file.name}</h3>
+
             <div className="progress">
               <div className="bar" style={{ width: `${progress}%` }} />
+
               <p className="status-text">
-                {progress < 100 ? 'Analyzing Floor Plan...' : 'Redirecting...'}
+                {progress < 100 ? "Analyzing Floor Plan..." : "Redirecting..."}
               </p>
             </div>
           </div>
         </div>
       )}
+
+      <AuthRequiredModal
+        isOpen={isAuthModalOpen}
+        onConfirm={handleModalConfirm}
+        onCancel={handleModalCancel}
+        title="Sign in to upload"
+        description="Uploading floor plans requires a Puter account. Please sign in to continue."
+        confirmLabel="Sign In with Puter"
+      />
     </div>
   );
 };
-
 export default Upload;

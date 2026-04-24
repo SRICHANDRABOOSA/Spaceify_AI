@@ -1,27 +1,75 @@
-import { ArrowRight, ArrowUpRight, Clock, Layers } from "lucide-react";
-import Navbar from "../../components/Navbar";
-import Upload from "../../components/Upload";
 import type { Route } from "./+types/home";
-import Button from "../../components/ui/Button";
-import { useNavigate } from "react-router";
+import Navbar from "../../components/Navbar";
+import { ArrowRight, ArrowUpRight, Clock, Layers } from "lucide-react";
+import Upload  from "../../components/Upload";
+import { useNavigate, useOutletContext } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { createProject, getProjects } from "../../lib/puter.action";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "New React Router App" },
-    { name: "description", content: "Welcome to React Router!" },
+    { title: "SPACEIFY_AI" },
+    { name: "description", content: "Welcome to SPACEIFY_AI!" },
   ];
 }
 
 export default function Home() {
   const navigate = useNavigate();
+  const { notify } = useOutletContext<AuthContext>();
+  const [projects, setProjects] = useState<DesignItem[]>([]);
+  const isCreatingProjectRef = useRef(false);
 
-  const handleUploadComplete = (base64Data: string) => {
-    const newId =Date.now().toString(); 
+  const handleUploadComplete = async (base64Image: string) => {
+    try {
+      if (isCreatingProjectRef.current) return false;
+      isCreatingProjectRef.current = true;
+      const newId = Date.now().toString();
+      const name = `Residence ${newId}`;
 
-    navigate(`/visualizer/${newId}`);
-    return true;
+      const newItem = {
+        id: newId,
+        name,
+        sourceImage: base64Image,
+        renderedImage: undefined,
+        timestamp: Date.now(),
+      };
 
+      const saved = await createProject({
+        item: newItem,
+        visibility: "private",
+      });
+
+      if (!saved) {
+        console.error("Failed to create project");
+        notify("Project setup failed. Please try uploading again.", "error");
+        return false;
+      }
+
+      setProjects((prev) => [saved, ...prev]);
+
+      navigate(`/visualizer/${newId}`, {
+        state: {
+          initialImage: saved.sourceImage,
+          initialRendered: saved.renderedImage || null,
+          name,
+        },
+      });
+
+      return true;
+    } finally {
+      isCreatingProjectRef.current = false;
+    }
   }
+
+  useEffect(() => {
+    const fetchProjects = async () => {
+      const items = await getProjects();
+
+      setProjects(items);
+    };
+
+    fetchProjects();
+  }, []);
 
   return (
     <div className="home">
@@ -33,31 +81,33 @@ export default function Home() {
             <div className="pulse"></div>
           </div>
 
-          <p>Introducing Spaceify_AI 2.0</p>
+          <p>Introducing SPACEIFY_AI 2.0</p>
         </div>
-        <h1>Build Beautiful spaces at the speed of thought with Spaceify_AI</h1>
+
+        <h1>Build beautiful spaces at the speed of thought with Space_AI</h1>
+
         <p className="subtitle">
-          {" "}
-          Spaceify_AI is an AI first design environment that helps you visulize,
-          render, and ship architure projects fasterer than ever.
+          Spaceify_AI is an AI-first design environment that helps you visualize,
+          render, and ship architectural projects faster than ever.
         </p>
+
         <div className="actions">
           <a href="#upload" className="cta">
-            start Building <ArrowRight className="icon" />
+            Start Building <ArrowRight className="icon" />
           </a>
-          <Button variant="outline" size="lg" className="demo">
-            Watch demo
-          </Button>
         </div>
+
         <div id="upload" className="upload-shell">
           <div className="grid-overlay" />
+
           <div className="upload-card">
             <div className="upload-head">
               <div className="upload-icon">
                 <Layers className="icon" />
               </div>
-              <h3>Upload your Floor Plan</h3>
-              <p>Supports JPG, PNG formats upto 10MB</p>
+
+              <h3>Upload your floor plan</h3>
+              <p>Supports JPG, PNG, formats up to 10MB</p>
             </div>
 
             <Upload onComplete={handleUploadComplete} />
@@ -71,38 +121,45 @@ export default function Home() {
             <div className="copy">
               <h2>Projects</h2>
               <p>
-                Your latest Work and Shared Community Projects all in one place.
+                Your latest work and shared community projects, all in one
+                place.
               </p>
             </div>
           </div>
 
           <div className="projects-grid">
-            <div className="project-card group">
-              <div className="preview">
-                <img
-                  src="https://roomify-mlhuk267-dfwu1i.puter.site/projects/1770803585402/rendered.png"
-                  alt="Project"
-                />
-                <div className="badge">
-                  <span>Community</span>
-                </div>
-              </div>
+            {projects.map(
+              ({ id, name, renderedImage, sourceImage, timestamp }) => (
+                <div
+                  key={id}
+                  className="project-card group"
+                  onClick={() => navigate(`/visualizer/${id}`)}
+                >
+                  <div className="preview">
+                    <img src={renderedImage || sourceImage} alt="Project" />
 
-              <div className="card-body">
-                <div>
-                  <h3>Project Manhattan</h3>
+                    <div className="badge">
+                      <span>Community</span>
+                    </div>
+                  </div>
 
-                  <div className="meta">
-                    <Clock size={12} />
-                    <span>{new Date("2026-04-19").toLocaleDateString()}</span>
-                    <span>By Srichandra</span>
+                  <div className="card-body">
+                    <div>
+                      <h3>{name}</h3>
+
+                      <div className="meta">
+                        <Clock size={12} />
+                        <span>{new Date(timestamp).toLocaleDateString()}</span>
+                        <span>By Srichandra</span>
+                      </div>
+                    </div>
+                    <div className="arrow">
+                      <ArrowUpRight size={18} />
+                    </div>
                   </div>
                 </div>
-                <div className="arrow">
-                  <ArrowUpRight size={20} />
-                </div>
-              </div>
-            </div>
+              ),
+            )}
           </div>
         </div>
       </section>

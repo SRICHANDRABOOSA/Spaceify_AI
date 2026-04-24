@@ -9,13 +9,13 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
-import type { Auth } from "@heyputer/puter.js";
-import { useEffect, useState } from "react";
-import { 
+import { useEffect, useRef, useState } from "react";
+import {
   getCurrentUser,
   signIn as puterSignIn,
   signOut as puterSignOut,
- } from "../lib/puter.action";
+  ensureWorkerExists,
+} from "../lib/puter.action";
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -52,10 +52,22 @@ const DEFAULT_AUTH_STATE: AuthState = {
   isSignedIn: false,
   userName: null,
   userId: null,
-}
+};
+
+type ThemeMode = "light" | "dark";
+const THEME_STORAGE_KEY = "archy_ai_theme";
+
+type ToastItem = {
+  id: number;
+  message: string;
+  type: "info" | "success" | "error";
+};
 
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>(DEFAULT_AUTH_STATE);
+  const [theme, setTheme] = useState<ThemeMode>("light");
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastIdRef = useRef(0);
 
   const refreshAuth = async () => {
     try {
@@ -72,27 +84,119 @@ export default function App() {
       setAuthState(DEFAULT_AUTH_STATE);
       return false;
     }
-  }
+  };
 
   useEffect(() => {
-    refreshAuth
-  },[]);
-  const signIn =async () =>{
+    refreshAuth();
+  }, []);
+
+  // Initialize worker when user is signed in
+  useEffect(() => {
+    if (authState.isSignedIn) {
+      ensureWorkerExists()
+        .then((workerUrl) => {
+          if (workerUrl) {
+            console.log("Worker initialized at:", workerUrl);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [authState.isSignedIn]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const storedTheme = window.localStorage.getItem(
+      THEME_STORAGE_KEY,
+    ) as ThemeMode | null;
+
+    if (storedTheme === "light" || storedTheme === "dark") {
+      setTheme(storedTheme);
+      return;
+    }
+
+    const prefersDark = window.matchMedia(
+      "(prefers-color-scheme: dark)",
+    ).matches;
+
+    setTheme(prefersDark ? "dark" : "light");
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const root = document.documentElement;
+    root.classList.toggle("theme-dark", theme === "dark");
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
+  const notify = (
+    message: string,
+    type: "info" | "success" | "error" = "info",
+    durationMs = 4000,
+  ) => {
+    const id = toastIdRef.current + 1;
+    toastIdRef.current = id;
+
+    setToasts((prev) => [...prev, { id, message, type }]);
+
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, durationMs);
+  };
+
+  const signIn = async () => {
     await puterSignIn();
-    return await refreshAuth();
-  }
+    const success = await refreshAuth();
+    if (success) {
+      // Ensure worker exists after sign in
+      try {
+        const workerUrl = await ensureWorkerExists();
+        if (workerUrl) {
+          console.log("Worker initialized at:", workerUrl);
+        }
+      } catch (e) {
+        console.error("Failed to initialize worker:", e);
+      }
+    }
+    return success;
+  };
+
   const signOut = async () => {
     puterSignOut();
     return await refreshAuth();
-  }
+  };
 
   return (
     <main className="min-h-screen bg-background text-foreground relative z-10">
       <Outlet
-        context={{...authState, refreshAuth, signIn, signOut}}
-      />;
+        context={{
+          ...authState,
+          theme,
+          toggleTheme,
+          notify,
+          refreshAuth,
+          signIn,
+          signOut,
+        }}
+      />
+
+      <div className="toast-stack" aria-live="polite" aria-atomic="true">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast toast--${toast.type}`}>
+            {toast.message}
+          </div>
+        ))}
+      </div>
     </main>
-  )  
+  );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
