@@ -1,7 +1,7 @@
 import type { Route } from "./+types/home";
 import Navbar from "../../components/Navbar";
 import { ArrowRight, ArrowUpRight, Clock, Layers } from "lucide-react";
-import Upload  from "../../components/Upload";
+import Upload from "../../components/Upload";
 import { useNavigate, useOutletContext } from "react-router";
 import { useEffect, useRef, useState } from "react";
 import { createProject, getProjects } from "../../lib/puter.action";
@@ -23,6 +23,10 @@ export default function Home() {
     try {
       if (isCreatingProjectRef.current) return false;
       isCreatingProjectRef.current = true;
+      console.log("[Upload->Home] Upload complete callback started", {
+        base64Length: base64Image.length,
+      });
+
       const newId = Date.now().toString();
       const name = `Residence ${newId}`;
 
@@ -41,12 +45,27 @@ export default function Home() {
 
       if (!saved) {
         console.error("Failed to create project");
+        console.log("[Upload->Home] Project creation failed after upload", {
+          projectId: newId,
+        });
         notify("Project setup failed. Please try uploading again.", "error");
         return false;
       }
 
-      setProjects((prev) => [saved, ...prev]);
+      console.log("[Upload->Home] Project created after upload", {
+        projectId: saved.id,
+        hasSourceImage: !!saved.sourceImage,
+        hasRenderedImage: !!saved.renderedImage,
+      });
 
+      setProjects((prev) => [saved, ...prev]);
+      console.log("[Upload->Home] Project list updated", {
+        insertedProjectId: saved.id,
+      });
+
+      console.log("[Upload->Home] Navigating to visualizer", {
+        projectId: newId,
+      });
       navigate(`/visualizer/${newId}`, {
         state: {
           initialImage: saved.sourceImage,
@@ -55,11 +74,15 @@ export default function Home() {
         },
       });
 
+      console.log("[Upload->Home] Upload flow fully completed", {
+        projectId: newId,
+      });
+
       return true;
     } finally {
       isCreatingProjectRef.current = false;
     }
-  }
+  };
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -87,8 +110,8 @@ export default function Home() {
         <h1>Build beautiful spaces at the speed of thought with Space_AI</h1>
 
         <p className="subtitle">
-          Spaceify_AI is an AI-first design environment that helps you visualize,
-          render, and ship architectural projects faster than ever.
+          Spaceify_AI is an AI-first design environment that helps you
+          visualize, render, and ship architectural projects faster than ever.
         </p>
 
         <div className="actions">

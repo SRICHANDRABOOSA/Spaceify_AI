@@ -3,8 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import { generate3DView } from "../../lib/ai.action";
 import { Box, Download, RefreshCcw, X } from "lucide-react";
 import Button from "../../components/ui/Button";
-import {createProject, getProjectById} from "../../lib/puter.action";
-import {ReactCompareSlider, ReactCompareSliderImage} from "react-compare-slider";
+import { createProject, getProjectById } from "../../lib/puter.action";
+import {
+  ReactCompareSlider,
+  ReactCompareSliderImage,
+} from "react-compare-slider";
+import { PROGRESS_STEP } from "../../lib/Constants";
 
 export default function Visualizer() {
   const { id } = useParams();
@@ -18,7 +22,25 @@ export default function Visualizer() {
   const [isProjectLoading, setIsProjectLoading] = useState(true);
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState(0);
   const [currentImage, setCurrentImage] = useState<string | null>(null);
+  const processingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+
+  const clearProcessingInterval = () => {
+    if (processingIntervalRef.current) {
+      clearInterval(processingIntervalRef.current);
+      processingIntervalRef.current = null;
+    }
+  };
+
+  const getProcessingLabel = (progress: number) => {
+    if (progress < 35) return "Analyzing floor plan...";
+    if (progress < 75) return "Generating your 3D visualization...";
+    if (progress < 100) return "Finalizing render and saving project...";
+    return "Done.";
+  };
 
   const handleBack = () => navigate("/");
 
@@ -48,9 +70,21 @@ export default function Visualizer() {
 
   const runGeneration = async (item: DesignItem) => {
     if (!id || !item.sourceImage) return;
+
     try {
       setIsProcessing(true);
+      setProcessingProgress(8);
+
+      clearProcessingInterval();
+      processingIntervalRef.current = setInterval(() => {
+        setProcessingProgress((prev) => {
+          if (prev >= 92) return prev;
+          return Math.min(prev + PROGRESS_STEP, 92);
+        });
+      }, 350);
+
       const result = await generate3DView({ sourceImage: item.sourceImage });
+      setProcessingProgress((prev) => Math.max(prev, 80));
 
       if (result.renderedImage) {
         setCurrentImage(result.renderedImage);
@@ -64,64 +98,78 @@ export default function Visualizer() {
           isPublic: item.isPublic ?? false,
         };
 
-        const saved = await createProject({item:updatedItem, visibility:"private"})
-          if(saved){
-              setProject(saved);
-              setCurrentImage(saved.renderedImage || result.renderedImage)
-          }
+        const saved = await createProject({
+          item: updatedItem,
+          visibility: "private",
+        });
+        if (saved) {
+          setProject(saved);
+          setCurrentImage(saved.renderedImage || result.renderedImage);
+        }
+
+        setProcessingProgress(100);
+        await new Promise((resolve) => setTimeout(resolve, 260));
       }
     } catch (e) {
       console.error(`Failed to generate 3D view: ${e}`);
     } finally {
+      clearProcessingInterval();
       setIsProcessing(false);
+      setProcessingProgress(0);
     }
   };
 
-    useEffect(() => {
-        let isMounted = true;
+  useEffect(() => {
+    return () => {
+      clearProcessingInterval();
+    };
+  }, []);
 
-        const loadProject = async () => {
-            if (!id) {
-                setIsProjectLoading(false);
-                return;
-            }
+  useEffect(() => {
+    let isMounted = true;
 
-            setIsProjectLoading(true);
+    const loadProject = async () => {
+      if (!id) {
+        setIsProjectLoading(false);
+        return;
+      }
 
-            const fetchedProject = await getProjectById({ id });
+      setIsProjectLoading(true);
 
-            if (!isMounted) return;
+      const fetchedProject = await getProjectById({ id });
 
-            setProject(fetchedProject);
-            setCurrentImage(fetchedProject?.renderedImage || null);
-            setIsProjectLoading(false);
-            hasInitialGenerated.current = false;
-        };
+      if (!isMounted) return;
 
-        loadProject();
+      setProject(fetchedProject);
+      setCurrentImage(fetchedProject?.renderedImage || null);
+      setIsProjectLoading(false);
+      hasInitialGenerated.current = false;
+    };
 
-        return () => {
-            isMounted = false;
-        };
-    }, [id]);
+    loadProject();
 
-    useEffect(() => {
-        if (
-            isProjectLoading ||
-            hasInitialGenerated.current ||
-            !project?.sourceImage
-        )
-            return;
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
 
-        if (project.renderedImage) {
-            setCurrentImage(project.renderedImage);
-            hasInitialGenerated.current = true;
-            return;
-        }
+  useEffect(() => {
+    if (
+      isProjectLoading ||
+      hasInitialGenerated.current ||
+      !project?.sourceImage
+    )
+      return;
 
-        hasInitialGenerated.current = true;
-        void runGeneration(project);
-    }, [project, isProjectLoading]);
+    if (project.renderedImage) {
+      setCurrentImage(project.renderedImage);
+      hasInitialGenerated.current = true;
+      return;
+    }
+
+    hasInitialGenerated.current = true;
+    void runGeneration(project);
+  }, [project, isProjectLoading]);
   return (
     <div className={"visualizer"}>
       <nav className={"topbar"}>
@@ -189,8 +237,18 @@ export default function Visualizer() {
                   <RefreshCcw className={"spinner"} />
                   <span className={"title"}> Rendering...</span>
                   <span className={"subtitle"}>
-                    {" "}
-                    Generating Your 3D visualization...
+                    {getProcessingLabel(processingProgress)}
+                  </span>
+
+                  <div className={"render-progress"}>
+                    <div
+                      className={"render-progress-bar"}
+                      style={{ width: `${processingProgress}%` }}
+                    />
+                  </div>
+
+                  <span className={"progress-value"}>
+                    {processingProgress}%
                   </span>
                 </div>
               </div>
@@ -199,34 +257,46 @@ export default function Visualizer() {
         </div>
 
         <div className={"panel compare"}>
-            <div className={"panel-header"}>
-                <div className={"panel-meta"}>
-                    <p>Comparison</p>
-                    <h3>Before and After</h3>
-                </div>
-                <div className={"hint"}> Drag to Compare</div>
+          <div className={"panel-header"}>
+            <div className={"panel-meta"}>
+              <p>Comparison</p>
+              <h3>Before and After</h3>
             </div>
+            <div className={"hint"}> Drag to Compare</div>
+          </div>
 
-            <div className={"compare-stage"}>
-                {project?.sourceImage && currentImage ?(
-                    <ReactCompareSlider
-                    defaultValue={50}
-                    style={{width:"100%", height:"auto"}}
-                    itemOne={
-                        <ReactCompareSliderImage src={project?.sourceImage} alt={"before"} className={"compare-img"}/>
-                    }
-                    itemTwo={
-                        <ReactCompareSliderImage src={currentImage} alt={"after"} className={"compare-img"}/>
-                    }
-                    />
-                ):(
-                    <div className={"compare-fallback"}>
-                        {project?.sourceImage&& (
-                            <img src={project.sourceImage} alt={"Before"} className={"compare-img"}/>
-                        )}
-                    </div>
-                    )}
-            </div>
+          <div className={"compare-stage"}>
+            {project?.sourceImage && currentImage ? (
+              <ReactCompareSlider
+                defaultValue={50}
+                style={{ width: "100%", height: "auto" }}
+                itemOne={
+                  <ReactCompareSliderImage
+                    src={project?.sourceImage}
+                    alt={"before"}
+                    className={"compare-img"}
+                  />
+                }
+                itemTwo={
+                  <ReactCompareSliderImage
+                    src={currentImage}
+                    alt={"after"}
+                    className={"compare-img"}
+                  />
+                }
+              />
+            ) : (
+              <div className={"compare-fallback"}>
+                {project?.sourceImage && (
+                  <img
+                    src={project.sourceImage}
+                    alt={"Before"}
+                    className={"compare-img"}
+                  />
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </section>
     </div>

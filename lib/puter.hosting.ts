@@ -39,10 +39,29 @@ export const uploadImageToHosting = async ({
   projectId,
   label,
 }: StoreHostedImageParams): Promise<HostedAsset | null> => {
+  console.log("[HostingUpload] Upload requested", {
+    projectId,
+    label,
+    hasHosting: !!hosting,
+    hasUrl: !!url,
+  });
+
   if (!hosting || !url) return null;
-  if (isHostedUrl(url)) return { url };
+  if (isHostedUrl(url)) {
+    console.log("[HostingUpload] URL already hosted; skipping upload", {
+      projectId,
+      label,
+      url,
+    });
+    return { url };
+  }
 
   try {
+    console.log("[HostingUpload] Resolving source blob", {
+      projectId,
+      label,
+    });
+
     const resolved =
       label === "rendered"
         ? await imageUrlToPngBlob(url).then((blob) =>
@@ -50,21 +69,49 @@ export const uploadImageToHosting = async ({
           )
         : await fetchBlobFromUrl(url);
 
-    if (!resolved) return null;
+    if (!resolved) {
+      console.warn("[HostingUpload] Failed to resolve source blob", {
+        projectId,
+        label,
+      });
+      return null;
+    }
 
     const contentType = resolved.contentType || resolved.blob.type || "";
     const ext = getImageExtension(contentType, url);
     const dir = `projects/${projectId}`;
     const filePath = `${dir}/${label}.${ext}`;
 
+    console.log("[HostingUpload] Preparing file for storage", {
+      projectId,
+      label,
+      contentType,
+      extension: ext,
+      filePath,
+    });
+
     const uploadFile = new File([resolved.blob], `${label}.${ext}`, {
       type: contentType,
+    });
+
+    console.log("[HostingUpload] Writing file to puter fs", {
+      projectId,
+      label,
+      dir,
+      filePath,
+      size: resolved.blob.size,
     });
 
     await puter.fs.mkdir(dir, { createMissingParents: true });
     await puter.fs.write(filePath, uploadFile);
 
     const hostedUrl = getHostedUrl({ subdomain: hosting.subdomain }, filePath);
+
+    console.log("[HostingUpload] Upload write completed", {
+      projectId,
+      label,
+      hostedUrl,
+    });
 
     return hostedUrl ? { url: hostedUrl } : null;
   } catch (e) {
